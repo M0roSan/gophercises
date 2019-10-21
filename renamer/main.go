@@ -1,62 +1,51 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
+	"regexp"
 )
 
+var re = regexp.MustCompile("^(.*?) ([0-9]{4}) [(]([0-9+]) of ([0-9]+)[)][.](.+?)$")
+var replaceString = "$2 - $1 - $3 of $4.$5"
+
 func main() {
-	dir := "sample"
-	toRename := make(map[string][]string)
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	var dry bool
+	flag.BoolVar(&dry, "dry", true, "Whether or not this should be a real or dry run")
+	flag.Parse()
+	walkDir := "sample"
+	var toRename []string
+	filepath.Walk(walkDir, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}
 		if _, err := match(info.Name()); err == nil {
-			toRename[path] = append(toRename[path], info.Name())
+			toRename = append(toRename, path)
 		}
 		return nil
 	})
-
-	for _, files := range toRename {
-		n := len(files)
-		sort.Strings(files)
-		for i, filename := range files {
-			res, _ := match(filename)
-			newFilename := fmt.Sprintf("%s - %d of %d.%s", res.base, i+1, n, res.ext)
-			oldPath := filepath.Join(dir, filename)
-			newPtah := filepath.Join(dir, newFilename)
-			fmt.Printf("mv %s => %s\n", oldPath, newPtah)
-			err := os.Rename(oldPath, newPtah)
+	for _, oldPath := range toRename {
+		dir := filepath.Dir(oldPath)
+		filename := filepath.Base(oldPath)
+		newFilename, _ := match(filename)
+		newPath := filepath.Join(dir, newFilename)
+		fmt.Printf("mv %s => %s\n", oldPath, newPath)
+		if !dry {
+			err := os.Rename(oldPath, newPath)
 			if err != nil {
-				fmt.Println("Error renaming:", oldPath, newPtah, err.Error())
+				fmt.Println("Error renaming:", oldPath, newPath, err.Error())
 			}
 		}
 	}
-
-}
-
-type matchResult struct {
-	base  string
-	ext   string
-	index int
 }
 
 // match returns new filename or an error if the filename
 // didn't match our pattern.
-func match(fileName string) (*matchResult, error) {
-	pieces := strings.Split(fileName, ".")
-	ext := pieces[len(pieces)-1]
-	tmp := strings.Join(pieces[0:len(pieces)-1], ".")
-	pieces = strings.Split(tmp, "_")
-	name := strings.Join(pieces[0:len(pieces)-1], "_")
-	number, err := strconv.Atoi(pieces[len(pieces)-1])
-	if err != nil {
-		return nil, fmt.Errorf("%s didn't match our pattern", fileName)
+func match(fileName string) (string, error) {
+	if !re.MatchString(fileName) {
+		return "", fmt.Errorf("%s didn't match our pattern", fileName)
 	}
-	return &matchResult{strings.Title(name), ext, number}, nil
+	return re.ReplaceAllString(fileName, replaceString), nil
 }
